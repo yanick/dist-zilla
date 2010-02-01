@@ -15,8 +15,6 @@ sub bundle_config {
     Dist::Zilla::Plugin::MetaYAML
     Dist::Zilla::Plugin::License
     Dist::Zilla::Plugin::Readme
-    Dist::Zilla::Plugin::PkgVersion
-    Dist::Zilla::Plugin::PodVersion
     Dist::Zilla::Plugin::PodTests
     Dist::Zilla::Plugin::ExtraTests
     Dist::Zilla::Plugin::InstallDirs
