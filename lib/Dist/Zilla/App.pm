@@ -5,53 +5,61 @@ package Dist::Zilla::App;
 use App::Cmd::Setup 0.307 -app; # need ->app in Result of Tester, GLD vers
 
 use Carp ();
-use Dist::Zilla::Config::Finder;
+use Dist::Zilla::MVP::Reader::Finder;
 use File::HomeDir ();
 use Moose::Autobox;
 use Path::Class;
-
-sub config {
-  my ($self) = @_;
-
-  my $homedir = File::HomeDir->my_home
-    or Carp::croak("couldn't determine home directory");
-
-  my $file = dir($homedir)->file('.dzil');
-  return unless -e $file;
-
-  if (-d $file) {
-    return Dist::Zilla::Config::Finder->new->read_config({
-      root     =>  dir($homedir)->subdir('.dzil'),
-      basename => 'config',
-    });
-  } else {
-    return Dist::Zilla::Config::Finder->new->read_config({
-      root     => dir($homedir),
-      filename => '.dzil',
-    });
-  }
-}
-
-sub config_for {
-  my ($self, $plugin_class) = @_;
-
-  return {} unless $self->config;
-
-  my ($section) = grep { ($_->package||'') eq $plugin_class }
-                  $self->config->sections;
-
-  return {} unless $section;
-
-  return $section->payload;
-}
+use Try::Tiny;
 
 sub global_opt_spec {
   return (
     [ "verbose|v:s@", "log additional output" ],
-    [ "inc|I=s@",     "additional \@INC dirs", {
+    [ "lib-inc|I=s@",     "additional \@INC dirs", {
         callbacks => { 'always fine' => sub { unshift @INC, @{$_[0]}; } }
     } ]
   );
+}
+
+sub _build_global_stashes {
+  my ($self) = @_;
+
+  return $self->{__global_stashes__} if $self->{__global_stashes__};
+
+  my $stash_registry = $self->{__global_stashes__} = {};
+
+  my $homedir = File::HomeDir->my_home
+    or Carp::croak("couldn't determine home directory");
+
+  my $config_dir  = $ENV{DZIL_GLOBAL_CONFIG_ROOT}
+                  ? dir($ENV{DZIL_GLOBAL_CONFIG_ROOT})
+                  : dir($homedir)->subdir('.dzil');
+
+  my $config_base = $config_dir->file('config');
+
+  require Dist::Zilla::MVP::Assembler::GlobalConfig;
+  require Dist::Zilla::MVP::Section;
+  my $assembler = Dist::Zilla::MVP::Assembler::GlobalConfig->new({
+    chrome => $self->chrome,
+    stash_registry => $stash_registry,
+    section_class  => 'Dist::Zilla::MVP::Section', # make this DZMA default
+  });
+
+  try {
+    my $reader = Dist::Zilla::MVP::Reader::Finder->new({
+      if_none => sub { return $_[2]->{assembler}->sequence },
+    });
+
+    my $seq = $reader->read_config($config_base, { assembler => $assembler });
+  } catch {
+    die "\n"
+      . "Your global configuration file couldn't be loaded.  It's a file\n"
+      . "matching ~/.dzil/config.*\n\n"
+      . "You can try deleting the file or you might need to upgrade from\n"
+      . "pre-version 4 format.  In most cases, this will just mean replacing\n"
+      . "[!release] with [%PAUSE] and deleting any [!new] stanza.\n";
+  };
+
+  return $stash_registry;
 }
 
 =method zilla
@@ -65,7 +73,19 @@ sub chrome {
   my ($self) = @_;
   require Dist::Zilla::Chrome::Term;
 
-  $self->{__chrome__} ||= Dist::Zilla::Chrome::Term->new;
+  return $self->{__chrome__} if $self->{__chrome__};
+
+  $self->{__chrome__} = Dist::Zilla::Chrome::Term->new;
+
+  my @v_plugins = $self->global_options->verbose
+                ? grep { length } @{ $self->global_options->verbose }
+                : ();
+
+  my $verbose = $self->global_options->verbose && ! @v_plugins;
+
+  $self->{__chrome__}->logger->set_debug($verbose ? 1 : 0);
+
+  return $self->{__chrome__};
 }
 
 sub zilla {
@@ -73,7 +93,7 @@ sub zilla {
 
   require Dist::Zilla;
 
-  return $self->{__PACKAGE__}{zilla} ||= do {
+  return $self->{'' . __PACKAGE__}{zilla} ||= do {
     my @v_plugins = $self->global_options->verbose
                   ? grep { length } @{ $self->global_options->verbose }
                   : ();
@@ -86,6 +106,7 @@ sub zilla {
 
     my $zilla = Dist::Zilla->from_config({
       chrome => $self->chrome,
+      _global_stashes => $self->_build_global_stashes,
     });
 
     $zilla->logger->set_debug($verbose ? 1 : 0);

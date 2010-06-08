@@ -1,22 +1,19 @@
 package Dist::Zilla::Types;
 # ABSTRACT: dzil-specific type library
 
-use MooseX::Types -declare => [qw(DistName License VersionStr)];
+=head1 OVERVIEW
+
+This library provides L<MooseX::Types> types for use by Dist::Zilla.  These
+types are not (yet?) for public consumption, and you should not rely on them.
+
+Dist::Zilla uses a number of types found in L<MooseX::Types::Perl>.  Maybe
+that's what you want.
+
+=cut
+
+use MooseX::Types -declare => [qw(License)];
 use MooseX::Types::Moose qw(Str);
 
-use version 0.82;
-
-subtype DistName,
-  as Str,
-  where { !/::/ },
-  message { "$_ looks like a module name, not a dist name" };
-
-subtype License,
-  as class_type('Software::License');
-
-subtype VersionStr,
-  as Str,
-  where { version::is_lax($_) },
-  message { "$_ is not a valid version string" };
+subtype License, as class_type('Software::License');
 
 1;

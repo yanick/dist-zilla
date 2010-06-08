@@ -5,6 +5,8 @@ use Moose::Role;
 with 'Dist::Zilla::Role::ConfigDumper';
 
 use Params::Util qw(_HASHLIKE);
+use Moose::Autobox;
+use MooseX::Types;
 
 use namespace::autoclean;
 
@@ -34,7 +36,7 @@ plugged.
 
 has zilla => (
   is  => 'ro',
-  isa => 'Dist::Zilla',
+  isa => class_type('Dist::Zilla'),
   required => 1,
   weak_ref => 1,
 );
@@ -61,6 +63,31 @@ has logger => (
 # modify them with around. -- rjbs, 2010-03-21
 sub mvp_multivalue_args {};
 sub mvp_aliases         { return {} };
+
+sub plugin_from_config {
+  my ($class, $name, $arg, $section) = @_;
+
+  my $self = $class->new(
+    $arg->merge({
+      plugin_name => $name,
+      zilla       => $section->sequence->assembler->zilla,
+    }),
+  );
+}
+
+sub register_component {
+  my ($class, $name, $arg, $section) = @_;
+
+  my $self = $class->plugin_from_config($name, $arg, $section);
+
+  my $version = $self->VERSION || 0;
+
+  $self->log_debug([ 'online, %s v%s', $self->meta->name, $version ]);
+
+  $self->zilla->plugins->push($self);
+
+  return;
+}
 
 no Moose::Role;
 1;

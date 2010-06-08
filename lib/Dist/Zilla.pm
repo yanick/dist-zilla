@@ -4,21 +4,25 @@ use Moose 0.92; # role composition fixes
 with 'Dist::Zilla::Role::ConfigDumper';
 
 use Moose::Autobox 0.09; # ->flatten
-use Dist::Zilla::Types qw(DistName License VersionStr);
-use MooseX::Types::Moose qw(Bool HashRef);
+use MooseX::LazyRequire;
+use MooseX::Types::Moose qw(ArrayRef Bool HashRef Object Str);
+use MooseX::Types::Perl qw(DistName LaxVersionStr);
 use MooseX::Types::Path::Class qw(Dir File);
 use Moose::Util::TypeConstraints;
+
+use Dist::Zilla::Types qw(License);
 
 use Archive::Tar;
 use File::Find::Rule;
 use File::pushd ();
+use File::ShareDir ();
 use Hash::Merge::Simple ();
 use List::MoreUtils qw(uniq);
 use List::Util qw(first);
 use Log::Dispatchouli 1.100712; # proxy_loggers, quiet_fatal
 use Params::Util qw(_HASHLIKE);
-use Path::Class ();
-use Software::License;
+use Path::Class;
+use Software::License 0.101370; # meta2_name
 use String::RewritePrefix;
 
 use Dist::Zilla::Prereqs;
@@ -38,13 +42,15 @@ authors, and is meant to be run on a repository checkout rather than on
 published, released code, it can do much more than those tools, and is free to
 make much more ludicrous demands in terms of prerequisites.
 
-For more information, see L<Dist::Zilla::Tutorial>.
+If you have access to the web, you can learn more and find an interactive
+tutorial at L<dzil.org|http://dzil.org/>.  If not, try
+L<Dist::Zilla::Tutorial>.
 
 =cut
 
 has chrome => (
   is  => 'rw',
-  isa => 'Object', # will be does => 'Dist::Zilla::Role::Chrome' when it exists
+  isa => role_type('Dist::Zilla::Role::Chrome'),
   required => 1,
 );
 
@@ -59,7 +65,7 @@ double colons (C<::>) replaced with dashes.  For example: C<Dist-Zilla>.
 has name => (
   is   => 'ro',
   isa  => DistName,
-  required => 1,
+  lazy_required => 1,
 );
 
 =attr version
@@ -68,8 +74,8 @@ This is the version of the distribution to be created.
 
 =cut
 
-has version_override => (
-  isa => 'Str',
+has _version_override => (
+  isa => LaxVersionStr,
   is  => 'ro' ,
   init_arg => 'version',
 );
@@ -77,7 +83,7 @@ has version_override => (
 # XXX: *clearly* this needs to be really much smarter -- rjbs, 2008-06-01
 has version => (
   is   => 'rw',
-  isa  => VersionStr,
+  isa  => LaxVersionStr,
   lazy => 1,
   init_arg  => undef,
   required  => 1,
@@ -87,7 +93,7 @@ has version => (
 sub _build_version {
   my ($self) = @_;
 
-  my $version = $self->version_override;
+  my $version = $self->_version_override;
 
   for my $plugin ($self->plugins_with(-VersionProvider)->flatten) {
     next unless defined(my $this_version = $plugin->provide_version);
@@ -145,15 +151,16 @@ distribution.  This may change!
 
 You can override the default by specifying the file path explicitly,
 ie:
-    main_module = lib/Foo/Bar.pm
+
+  main_module = lib/Foo/Bar.pm
 
 =cut
 
-has main_module_override => (
+has _main_module_override => (
   isa => 'Str',
   is  => 'ro' ,
-  init_arg => 'main_module',
-  predicate => 'has_main_module_override',
+  init_arg  => 'main_module',
+  predicate => '_has_main_module_override',
 );
 
 has main_module => (
@@ -169,8 +176,8 @@ has main_module => (
     my $file;
     my $guessing = q{};
 
-    if ( $self->has_main_module_override ) {
-       $file = first { $_->name eq $self->main_module_override }
+    if ( $self->_has_main_module_override ) {
+       $file = first { $_->name eq $self->_main_module_override }
                $self->files->flatten;
     } else {
        $guessing = 'guessing '; # We're having to guess
@@ -193,42 +200,12 @@ has main_module => (
   },
 );
 
-=attr copyright_holder
-
-This is the name of the legal entity who holds the copyright on this code.
-This is a required attribute with no default!
-
-=cut
-
-has copyright_holder => (
-  is   => 'ro',
-  isa  => 'Str',
-  required => 1,
-);
-
-=attr copyright_year
-
-This is the year of copyright for the dist.  By default, it's this year.
-
-=cut
-
-has copyright_year => (
-  is   => 'ro',
-  isa  => 'Int',
-
-  # Oh man.  This is a terrible idea!  I mean, what if by the code gets run
-  # around like Dec 31, 23:59:59.9 and by the time the default gets called it's
-  # the next year but the default was already set up?  Oh man.  That could ruin
-  # lives!  I guess we could make this a sub to defer the guess, but think of
-  # the performance hit!  I guess we'll have to suffer through this until we
-  # can optimize the code to not take .1s to run, right? -- rjbs, 2008-06-13
-  default => (localtime)[5] + 1900,
-);
-
 =attr license
 
 This is the L<Software::License|Software::License> object for this dist's
-license.  It will be created automatically, if possible, with the
+license and copyright.
+
+It will be created automatically, if possible, with the
 C<copyright_holder> and C<copyright_year> attributes.  If necessary, it will
 try to guess the license from the POD of the dist's main module.
 
@@ -238,58 +215,110 @@ understandable, like C<Perl_5>.
 =cut
 
 has license => (
-  reader => 'license',
-  writer => '_set_license',
-  isa    => License,
-  init_arg => undef,
+  is   => 'ro',
+  isa  => License,
+  lazy => 1,
+  init_arg  => 'license_obj',
+  predicate => '_has_license',
+  builder   => '_build_license',
+  handles   => {
+    copyright_holder => 'holder',
+    copyright_year   => 'year',
+  },
 );
 
-sub _initialize_license {
-  my ($self, $value) = @_;
+sub _build_license {
+  my ($self) = @_;
 
-  my $license;
+  my $license_class    = $self->_license_class;
+  my $copyright_holder = $self->_copyright_holder;
+  my $copyright_year   = $self->_copyright_year;
 
-  # If it's an object (weird!) we're being handed a pre-created license and
-  # we should probably just trust it. -- rjbs, 2009-07-21
-  $license = $value if blessed $value;
+  if ($license_class) {
+    $license_class = String::RewritePrefix->rewrite(
+      {
+        '=' => '',
+        ''  => 'Software::License::'
+      },
+      $license_class,
+    );
+  } else {
+    require Software::LicenseUtils;
+    my @guess = Software::LicenseUtils->guess_license_from_pod(
+      $self->main_module->content
+    );
 
-  unless ($license) {
-    my $license_class = $value;
-
-    if ($license_class) {
-      $license_class = String::RewritePrefix->rewrite(
-        {
-          '=' => '',
-          ''  => 'Software::License::'
-        },
-        $license_class,
+    if (@guess != 1) {
+      $self->log_fatal(
+        "no license data in config, no %Rights stash,",
+        "couldn't make a good guess at license from Pod; giving up"
       );
-    } else {
-      require Software::LicenseUtils;
-      my @guess = Software::LicenseUtils->guess_license_from_pod(
-        $self->main_module->content
-      );
-
-      $self->log_fatal("couldn't make a good guess at license") if @guess != 1;
-
-      my $filename = $self->main_module->name;
-      $license_class = $guess[0];
-      $self->log("based on POD in $filename, guessing license is $guess[0]");
     }
 
-    eval "require $license_class; 1" or die;
-
-    $license = $license_class->new({
-      holder => $self->copyright_holder,
-      year   => $self->copyright_year,
-    });
+    my $filename = $self->main_module->name;
+    $license_class = $guess[0];
+    $self->log("based on POD in $filename, guessing license is $guess[0]");
   }
 
-  $self->log_fatal("$value is not a valid license")
-    if ! License->check($license);
+  Class::MOP::load_class($license_class);
 
-  $self->_set_license($license);
+  my $license = $license_class->new({
+    holder => $self->_copyright_holder,
+    year   => $self->_copyright_year,
+  });
+
+  $self->_clear_license_class;
+  $self->_clear_copyright_holder;
+  $self->_clear_copyright_year;
+
+  return $license;
 }
+
+has _license_class => (
+  is        => 'ro',
+  isa       => 'Maybe[Str]',
+  lazy      => 1,
+  init_arg  => 'license',
+  clearer   => '_clear_license_class',
+  default   => sub {
+    my $stash = $_[0]->stash_named('%Rights');
+    $stash && return $stash->license_class;
+    return;
+  }
+);
+
+has _copyright_holder => (
+  is        => 'ro',
+  isa       => 'Maybe[Str]',
+  lazy      => 1,
+  init_arg  => 'copyright_holder',
+  clearer   => '_clear_copyright_holder',
+  default   => sub {
+    return unless my $stash = $_[0]->stash_named('%Rights');
+    $stash && return $stash->copyright_holder;
+    return;
+  }
+);
+
+has _copyright_year => (
+  is        => 'ro',
+  isa       => 'Int',
+  lazy      => 1,
+  init_arg  => 'copyright_year',
+  clearer   => '_clear_copyright_year',
+  default   => sub {
+    # Oh man.  This is a terrible idea!  I mean, what if by the code gets run
+    # around like Dec 31, 23:59:59.9 and by the time the default gets called
+    # it's the next year but the default was already set up?  Oh man.  That
+    # could ruin lives!  I guess we could make this a sub to defer the guess,
+    # but think of the performance hit!  I guess we'll have to suffer through
+    # this until we can optimize the code to not take .1s to run, right? --
+    # rjbs, 2008-06-13
+    my $stash = $_[0]->stash_named('%Rights');
+    my $year  = $stash && $stash->copyright_year;
+    return defined $year ? $year : (localtime)[5] + 1900;
+  }
+);
 
 =attr authors
 
@@ -306,7 +335,7 @@ This is likely to change at some point in the near future.
 
 has authors => (
   is   => 'ro',
-  isa  => 'ArrayRef[Str]',
+  isa  => ArrayRef[Str],
   lazy => 1,
   required => 1,
   default  => sub { [ $_[0]->copyright_holder ] },
@@ -317,11 +346,15 @@ has authors => (
 This is an arrayref of objects implementing L<Dist::Zilla::Role::File> that
 will, if left in this arrayref, be built into the dist.
 
+Non-core code should avoid altering this arrayref, but sometimes there is not
+other way to change the list of files.  In the future, the representation used
+for storing files will be changed.
+
 =cut
 
 has files => (
   is   => 'ro',
-  isa  => 'ArrayRef[Dist::Zilla::Role::File]',
+  isa  => ArrayRef[ role_type('Dist::Zilla::Role::File') ],
   lazy => 1,
   init_arg => undef,
   default  => sub { [] },
@@ -358,6 +391,8 @@ has is_trial => (
 This is an arrayref of plugins that have been plugged into this Dist::Zilla
 object.
 
+Non-core code should not alter this arrayref.
+
 =cut
 
 has plugins => (
@@ -381,9 +416,9 @@ has built_in => (
 
 =attr distmeta
 
-This is a hashref containing the metadata about this distribution that
-will be stored in META.yml or META.json.  You should not alter the
-metadata in this hash; use a MetaProvider plugin instead.
+This is a hashref containing the metadata about this distribution that will be
+stored in META.yml or META.json.  You should not alter the metadata in this
+hash; use a MetaProvider plugin instead.
 
 =cut
 
@@ -400,17 +435,24 @@ sub _build_distmeta {
 
   my $meta = {
     'meta-spec' => {
-      version => 1.4,
-      url     => 'http://module-build.sourceforge.net/META-spec-v1.4.html',
+      version => 2,
+      url     => 'http://github.com/dagolden/cpan-meta/',
     },
     name     => $self->name,
     version  => $self->version,
     abstract => $self->abstract,
     author   => $self->authors,
-    license  => $self->license->meta_yml_name,
-    generated_by => (ref $self)
-                  . ' version '
-                  . (defined $self->VERSION ? $self->VERSION : '(undef)')
+    license  => $self->license->meta2_name,
+
+    # XXX: what about unstable?
+    release_status => ($self->is_trial or $self->version =~ /_/)
+                    ? 'testing'
+                    : 'stable',
+
+    dynamic_config => 0, # problematic, I bet -- rjbs, 2010-06-04
+    generated_by   => (ref $self)
+                    . ' version '
+                    . (defined $self->VERSION ? $self->VERSION : '(undef)')
   };
 
   $meta = Hash::Merge::Simple::merge($meta, $_->metadata)
@@ -419,18 +461,14 @@ sub _build_distmeta {
   return $meta;
 }
 
-=attr prereq
+=attr prereqs
 
-This is a hashref of module prerequisites.  This attribute is likely to get
-greatly overhauled, or possibly replaced with a method based on other
-(private?) attributes.
-
-I<Actually>, it is more likely that this attribute will contain an object in
-the future.
+This is a L<Dist::Zilla::Prereqs> object, which is a thin layer atop
+L<CPAN::Meta::Prereqs>, and describes the distribution's prerequisites.
 
 =cut
 
-has prereq => (
+has prereqs => (
   is   => 'ro',
   isa  => 'Dist::Zilla::Prereqs',
   init_arg => undef,
@@ -445,10 +483,13 @@ has prereq => (
 This routine returns a new Zilla from the configuration in the current working
 directory.
 
+This method should not be relied upon, yet.  Its semantics are likely to
+change.
+
 Valid arguments are:
 
   config_class - the class to use to read the config
-                 default: Dist::Zilla::Config::Finder
+                 default: Dist::Zilla::MVP::Reader::Finder
 
 =cut
 
@@ -456,49 +497,16 @@ sub from_config {
   my ($class, $arg) = @_;
   $arg ||= {};
 
-  my $root = Path::Class::dir($arg->{dist_root} || '.');
+  my $root = dir($arg->{dist_root} || '.');
 
-  my ($seq) = $class->_load_config({
+  my $sequence = $class->_load_config({
     root   => $root,
-    logger => $arg->{chrome}->logger,
-    config_class => $arg->{config_class},
-  });
-
-  my $core_config = $seq->section_named('_')->payload;
-
-  my $self = $class->new({
-    %$core_config,
     chrome => $arg->{chrome},
+    config_class    => $arg->{config_class},
+    _global_stashes => $arg->{_global_stashes},
   });
 
-  for my $section ($seq->sections) {
-    next if $section->name eq '_';
-
-    my ($name, $plugin_class, $arg) = (
-      $section->name,
-      $section->package,
-      $section->payload,
-    );
-
-    $self->log_fatal("$name arguments attempted to override plugin name")
-      if defined $arg->{plugin_name};
-
-    $self->log_fatal("$name arguments attempted to override plugin name")
-      if defined $arg->{zilla};
-
-    my $plugin = $plugin_class->new(
-      $arg->merge({
-        plugin_name => $name,
-        zilla       => $self,
-      }),
-    );
-
-    my $version = $plugin->VERSION || 0;
-
-    $plugin->log_debug([ 'online, %s v%s', $plugin->meta->name, $version ]);
-
-    $self->plugins->push($plugin);
-  }
+  my $self = $sequence->section_named('_')->zilla;
 
   $self->_setup_default_plugins;
 
@@ -508,6 +516,27 @@ sub from_config {
 sub _setup_default_plugins {
   my ($self) = @_;
 
+  my $infix  = $self->__is_minter ? 'minter' : 'builder';
+  my $method = "_setup_default_$infix\_plugins";
+  $self->$method;
+}
+
+sub _setup_default_minter_plugins {
+  my ($self) = @_;
+
+  unless ($self->plugin_named(':DefaultModuleMaker')) {
+    require Dist::Zilla::Plugin::TemplateModule;
+    my $plugin = Dist::Zilla::Plugin::TemplateModule->new({
+      plugin_name => ':DefaultModuleMaker',
+      zilla       => $self,
+    });
+
+    $self->plugins->push($plugin);
+  }
+}
+
+sub _setup_default_builder_plugins {
+  my ($self) = @_;
   unless ($self->plugin_named(':InstallModules')) {
     require Dist::Zilla::Plugin::FinderCode;
     my $plugin = Dist::Zilla::Plugin::FinderCode->new({
@@ -568,30 +597,44 @@ sub _setup_default_plugins {
 }
 
 sub _load_config {
-  my ($self, $arg) = @_;
+  my ($class, $arg) = @_;
   $arg ||= {};
 
-  my $config_class = $arg->{config_class} ||= 'Dist::Zilla::Config::Finder';
-  unless (eval "require $config_class; 1") {
-    die "couldn't load $config_class: $@"; ## no critic Carp
-  }
+  my $config_class =
+    $arg->{config_class} ||= 'Dist::Zilla::MVP::Reader::Finder';
 
-  $arg->{logger}->log_debug(
+  Class::MOP::load_class($config_class);
+
+  $arg->{chrome}->logger->log_debug(
     { prefix => '[DZ] ' },
     "reading configuration using $config_class"
   );
 
   my $root = $arg->{root};
-  my ($sequence) = $config_class->new->read_config({
-    root     => $root,
-    basename => 'dist',
+
+  require Dist::Zilla::MVP::Assembler::Zilla;
+  require Dist::Zilla::MVP::Section;
+  my $assembler = Dist::Zilla::MVP::Assembler::Zilla->new({
+    chrome        => $arg->{chrome},
+    zilla_class   => $class,
+    section_class => 'Dist::Zilla::MVP::Section', # make this DZMA default
   });
 
-  # I wonder if the root should be named '' or something, but that's probably
-  # sort of a ridiculous thing to worry about. -- rjbs, 2009-08-24
-  $sequence->section_named('_')->add_value(root => $root);
+  for ($assembler->sequence->section_named('_')) {
+    $_->add_value(chrome => $arg->{chrome});
+    $_->add_value(root   => $arg->{root});
+    $_->add_value(_global_stashes => $arg->{_global_stashes})
+      if $arg->{_global_stashes};
+  }
 
-  return $sequence;
+  my $seq = $config_class->read_config(
+    $root->file('dist'),
+    {
+      assembler => $assembler
+    },
+  );
+
+  return $seq;
 }
 
 =method plugin_named
@@ -676,7 +719,7 @@ already been built, an exception will be thrown.
 
 =method build
 
-This method just calls C<build_in> with no arguments.  It get you the default
+This method just calls C<build_in> with no arguments.  It gets you the default
 behavior without the weird-looking formulation of C<build_in> with no object
 for the preposition!
 
@@ -686,6 +729,8 @@ sub build { $_[0]->build_in }
 
 sub build_in {
   my ($self, $root) = @_;
+
+  $self->log_fatal("tried to build with a minter") if $self->__is_minter;
 
   $self->log_fatal("attempted to build " . $self->name . " a second time")
     if $self->built_in;
@@ -700,11 +745,10 @@ sub build_in {
 
   $_->register_prereqs for $self->plugins_with(-PrereqSource)->flatten;
 
-  $self->prereq->finalize;
+  $self->prereqs->finalize;
 
-  my $meta   = $self->distmeta;
-  my $prereq = $self->prereq->as_distmeta;
-  $meta->{ $_ } = $prereq->{ $_ } for keys %$prereq;
+  # Barf if someone has already set up a prereqs entry? -- rjbs, 2010-04-13
+  $self->distmeta->{prereqs} = $self->prereqs->as_string_hash;
 
   $_->setup_installer for $self->plugins_with(-InstallTool)->flatten;
 
@@ -731,6 +775,12 @@ sub build_in {
 This method behaves like C<L</build_in>>, but if the dist is already built in
 C<$root> (or the default root, if no root is given), no exception is raised.
 
+=method ensure_built_in
+
+This method just calls C<ensure_built_in> with no arguments.  It gets you the
+default behavior without the weird-looking formulation of C<ensure_built_in>
+with no object for the preposition!
+
 =cut
 
 sub ensure_built {
@@ -750,7 +800,7 @@ sub ensure_built_in {
 
 =method build_archive
 
-  $dist->build_archive;
+  $zilla->build_archive;
 
 This method will ensure that the dist has been built, and will then build a
 tarball of the build directory in the current directory.
@@ -768,13 +818,13 @@ sub build_archive {
 
   my %seen_dir;
   for my $distfile ($self->files->flatten) {
-    my $in = Path::Class::file($distfile->name)->dir;
+    my $in = file($distfile->name)->dir;
     $archive->add_files( $built_in->subdir($in) ) unless $seen_dir{ $in }++;
     $archive->add_files( $built_in->file( $distfile->name ) );
   }
 
   ## no critic
-  $file ||= Path::Class::file(join(q{},
+  $file ||= file(join(q{},
     $self->name,
     '-',
     $self->version,
@@ -812,7 +862,7 @@ sub _prep_build_root {
   my ($self, $build_root) = @_;
 
   my $default_name = $self->name . q{-} . $self->version;
-  $build_root = Path::Class::dir($build_root || $default_name);
+  $build_root = dir($build_root || $default_name);
 
   $build_root->mkpath unless -d $build_root;
 
@@ -829,7 +879,7 @@ sub _write_out_file {
   # Okay, this is a bit much, until we have ->debug. -- rjbs, 2008-06-13
   # $self->log("writing out " . $file->name);
 
-  my $file_path = Path::Class::file($file->name);
+  my $file_path = file($file->name);
 
   my $to_dir = $build_root->subdir( $file_path->dir );
   my $to = $to_dir->file( $file_path->basename );
@@ -874,6 +924,11 @@ sub release {
 
 =method clean
 
+This method removes temporary files and directories suspected to have been
+produced by the Dist::Zilla build process.  Specifically, it deletes the
+F<.build> directory and any entity that starts with the dist name and a hyphen,
+like matching the glob C<Your-Dist-*>.
+
 =cut
 
 sub clean {
@@ -888,6 +943,19 @@ sub clean {
 
 =method install
 
+  $zilla->install( \%arg );
+
+This method installs the distribution locally.  The distribution will be built
+in a temporary subdirectory, then the process will change directory to that
+subdir and an installer will be run.
+
+Valid arguments are:
+
+  install_command - the command to run in the subdir to install the dist
+                    default (roughly): $^X -MCPAN -einstall .
+
+                    this argument should be an arrayref
+
 =cut
 
 sub install {
@@ -896,10 +964,10 @@ sub install {
 
   require File::Temp;
 
-  my $build_root = Path::Class::dir('.build');
+  my $build_root = dir('.build');
   $build_root->mkpath unless -d $build_root;
 
-  my $target = Path::Class::dir( File::Temp::tempdir(DIR => $build_root) );
+  my $target = dir( File::Temp::tempdir(DIR => $build_root) );
   $self->log("building distribution under $target for installation");
   $self->ensure_built_in($target);
 
@@ -907,9 +975,11 @@ sub install {
     ## no critic Punctuation
     my $wd = File::pushd::pushd($target);
     my @cmd = $arg->{install_command}
-            ? $arg->{install_command}
-            : ($^X => '-MCPAN' => '-einstall "."');
+            ? @{ $arg->{install_command} }
+            : ($^X => '-MCPAN' =>
+                $^O eq 'MSWin32' ? q{-e"install '.'"} : '-einstall "."');
 
+    $self->log_debug([ 'installing via %s', \@cmd ]);
     system(@cmd) && $self->log_fatal([ "error running %s", \@cmd ]);
   };
 
@@ -928,7 +998,8 @@ sub install {
 
   $zilla->test;
 
-This method builds a new copy of the distribution and tests it.
+This method builds a new copy of the distribution and tests it using
+C<L</run_tests_in>>.
 
 =cut
 
@@ -940,10 +1011,10 @@ sub test {
 
   require File::Temp;
 
-  my $build_root = Path::Class::dir('.build');
+  my $build_root = dir('.build');
   $build_root->mkpath unless -d $build_root;
 
-  my $target = Path::Class::dir( File::Temp::tempdir(DIR => $build_root) );
+  my $target = dir( File::Temp::tempdir(DIR => $build_root) );
   $self->log("building test distribution under $target");
 
   local $ENV{AUTHOR_TESTING} = 1;
@@ -984,6 +1055,13 @@ sub run_tests_in {
 
 =method run_in_build
 
+  $zilla->run_in_build( \@cmd );
+
+This method makes a temporary directory, builds the distribution there,
+executes the dist's first L<BuildRunner|Dist::Zilla::Role::BuildRunner>, and
+then runs the given command in the build directory.  If the command exits
+non-zero, the directory will be left in place.
+
 =cut
 
 sub run_in_build {
@@ -991,7 +1069,7 @@ sub run_in_build {
 
   # The sort below is a cheap hack to get ModuleBuild ahead of
   # ExtUtils::MakeMaker. -- rjbs, 2010-01-05
-  Carp::croak("you can't build without any BuildRunner plugins")
+  $self->log_fatal("you can't build without any BuildRunner plugins")
     unless my @builders =
     $self->plugins_with(-BuildRunner)->sort->reverse->flatten;
 
@@ -999,10 +1077,10 @@ sub run_in_build {
   require File::Temp;
 
   # dzil-build the dist
-  my $build_root = Path::Class::dir('.build');
+  my $build_root = dir('.build');
   $build_root->mkpath unless -d $build_root;
 
-  my $target    = Path::Class::dir( File::Temp::tempdir(DIR => $build_root) );
+  my $target    = dir( File::Temp::tempdir(DIR => $build_root) );
   my $abstarget = $target->absolute;
   $self->log("building test distribution under $target");
 
@@ -1029,11 +1107,18 @@ sub run_in_build {
   }
 }
 
-=method log
+=attr logger
 
-  $zilla->log($message);
+This attribute stores a L<Log::Dispatchouli::Proxy> object, used to log
+messages.  By default, a proxy to the dist's L<Chrome|Dist::Zilla::Chrome> is
+taken.
 
-This method logs the given message.
+The following methods are delegated from the Dist::Zilla object to the logger:
+
+=for :list
+* log
+* log_debug
+* log_fatal
 
 =cut
 
@@ -1047,18 +1132,165 @@ has logger => (
   },
 );
 
-sub BUILD {
-  my ($self, $arg) = @_;
-
-  $self->_initialize_license($arg->{license});
-}
-
 around dump_config => sub {
   my ($orig, $self) = @_;
   my $config = $self->$orig;
   $config->{is_trial} = $self->is_trial;
   return $config;
 };
+
+has _local_stashes => (
+  is   => 'ro',
+  isa  => HashRef[ Object ],
+  lazy => 1,
+  default => sub { {} },
+);
+
+has _global_stashes => (
+  is   => 'ro',
+  isa  => HashRef[ Object ],
+  lazy => 1,
+  default => sub { {} },
+);
+
+=method stash_named
+
+  my $stash = $zilla->stash_named( $name );
+
+This method will return the stash with the given name, or undef if none exists.
+It looks for a local stash (for this dist) first, then falls back to a global
+stash (from the user's global configuration).
+
+=cut
+
+sub stash_named {
+  my ($self, $name) = @_;
+
+  return $self->_local_stashes->{ $name } if $self->_local_stashes->{$name};
+  return $self->_global_stashes->{ $name };
+}
+
+#####################################
+## BEGIN DIST MINTING CODE
+#####################################
+
+sub _new_from_profile {
+  my ($class, $profile_name, $arg) = @_;
+  $arg ||= {};
+
+  my $config_class =
+    $arg->{config_class} ||= 'Dist::Zilla::MVP::Reader::Finder';
+  Class::MOP::load_class($config_class);
+
+  $arg->{chrome}->logger->log_debug(
+    { prefix => '[DZ] ' },
+    "reading configuration using $config_class"
+  );
+
+  require Dist::Zilla::MVP::Assembler::Zilla;
+  require Dist::Zilla::MVP::Section;
+  my $assembler = Dist::Zilla::MVP::Assembler::Zilla->new({
+    chrome        => $arg->{chrome},
+    zilla_class   => $class,
+    section_class => 'Dist::Zilla::MVP::Section', # make this DZMA default
+  });
+
+  for ($assembler->sequence->section_named('_')) {
+    $_->add_value(name   => $arg->{name});
+    $_->add_value(chrome => $arg->{chrome});
+    $_->add_value(__is_minter => 1);
+    $_->add_value(_global_stashes => $arg->{_global_stashes})
+      if $arg->{_global_stashes};
+  }
+
+  my $profile_dir = dir( File::HomeDir->my_home )->subdir(qw(.dzil profiles));
+
+  my $seq;
+
+  if ($profile_name eq 'default' and ! -e $profile_dir->subdir('default')) {
+    $profile_dir = dir( File::ShareDir::dist_dir('Dist-Zilla') )
+                 ->subdir('profiles');
+  }
+
+  $assembler->sequence->section_named('_')->add_value(
+    root => $profile_dir->subdir($profile_name)
+  );
+  $seq = $config_class->read_config(
+    $profile_dir->subdir($profile_name)->file('profile'),
+    {
+      assembler => $assembler
+    },
+  );
+
+  my $self = $seq->section_named('_')->zilla;
+
+  $self->_setup_default_plugins;
+
+  return $self;
+}
+
+# XXX: This is here only because we have not yet broken Zilla into a abstract
+# base class with Minter and Builder subclasses. -- rjbs, 2010-05-03
+has __is_minter => (
+  is  => 'ro',
+  isa => Bool,
+  default => 0,
+);
+
+sub mint_dist {
+  my ($self, $arg) = @_;
+
+  $self->log_fatal("tried to mint with a builder") unless $self->__is_minter;
+
+  my $name = $self->name;
+  my $dir  = dir($name);
+  $self->log_fatal("./$name already exists") if -e $dir;
+
+  $dir = $dir->absolute;
+
+  # XXX: We should have a way to get more than one module name in, and to
+  # supply plugin names for the minter to use. -- rjbs, 2010-05-03
+  my @modules = do {
+    (my $module_name = $name) =~ s/-/::/g;
+    ({ name => $module_name });
+  };
+
+  $self->log("making directory ./$name");
+  $dir->mkpath;
+
+  my $wd = File::pushd::pushd($self->root);
+
+  $_->before_mint  for $self->plugins_with(-BeforeMint)->flatten;
+  $_->gather_files for $self->plugins_with(-FileGatherer)->flatten;
+
+  for my $module (@modules) {
+    my $minter = $self->plugin_named(
+      $module->{minter_name} || ':DefaultModuleMaker'
+    );
+    
+    $minter->make_module({ name => $module->{name} })
+  }
+
+  $_->prune_files  for $self->plugins_with(-FilePruner)->flatten;
+  $_->munge_files  for $self->plugins_with(-FileMunger)->flatten;
+
+  $self->_check_dupe_files;
+
+  $self->log("writing files to $dir");
+
+  for my $file ($self->files->flatten) {
+    $self->_write_out_file($file, $dir);
+  }
+
+  $_->after_mint({ mint_root => $dir })
+    for $self->plugins_with(-AfterMint)->flatten;
+
+  $self->log("dist minted in ./$name");
+}
+
+#####################################
+## END DIST MINTING CODE
+#####################################
 
 __PACKAGE__->meta->make_immutable;
 1;
@@ -1069,11 +1301,7 @@ __END__
 There are usually people on C<irc.perl.org> in C<#distzilla>, even if they're
 idling.
 
-There is a mailing list to discuss Dist::Zilla, which you can join here:
-
-L<http://www.listbox.com/subscribe/?list_id=139292>
-
-The archive is available here:
-
-L<http://listbox.com/member/archive/139292>
+There is a mailing list to discuss Dist::Zilla.  You can L<join the
+list|http://www.listbox.com/subscribe/?list_id=139292> or L<browse the
+archives|http://listbox.com/member/archive/139292>.
 

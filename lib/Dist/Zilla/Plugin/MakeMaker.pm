@@ -17,6 +17,8 @@ plugin should also be loaded.
 
 =cut
 
+use Config;
+
 use Data::Dumper ();
 use List::MoreUtils qw(any uniq);
 
@@ -38,10 +40,10 @@ my {{ $WriteMakefileArgs }}
 
 unless ( eval { ExtUtils::MakeMaker->VERSION(6.56) } ) {
   my $br = delete $WriteMakefileArgs{BUILD_REQUIRES};
-  my $pp = $WriteMakefileArgs{PREREQ_PM}; 
+  my $pp = $WriteMakefileArgs{PREREQ_PM};
   for my $mod ( keys %$br ) {
     if ( exists $pp->{$mod} ) {
-      $pp->{$mod} = $br->{$mod} if $br->{$mod} > $pp->{$mod}; 
+      $pp->{$mod} = $br->{$mod} if $br->{$mod} > $pp->{$mod};
     }
     else {
       $pp->{$mod} = $br->{$mod};
@@ -103,8 +105,22 @@ sub setup_installer {
     );
   }
 
-  my $meta_prereq = $self->zilla->prereq->as_distmeta;
-  my $perl_prereq = delete $meta_prereq->{requires}{perl};
+  my $prereqs = $self->zilla->prereqs;
+  my $perl_prereq = $prereqs->requirements_for(qw(runtime requires))
+                  ->as_string_hash->{perl};
+
+  my $prereqs_dump = sub {
+    $prereqs->requirements_for(@_)
+            ->clone
+            ->clear_requirement('perl')
+            ->as_string_hash;
+  };
+
+  my $build_prereq
+    = $prereqs->requirements_for(qw(build requires))
+    ->clone
+    ->add_requirements($prereqs->requirements_for(qw(test requires)))
+    ->as_string_hash;
 
   my %write_makefile_args = (
     DISTNAME  => $self->zilla->name,
@@ -115,9 +131,9 @@ sub setup_installer {
     LICENSE   => $self->zilla->license->meta_yml_name,
     EXE_FILES => [ @exe_files ],
 
-    CONFIGURE_REQUIRES => delete $meta_prereq->{configure_requires},
-    BUILD_REQUIRES     => delete $meta_prereq->{build_requires},
-    PREREQ_PM          => delete $meta_prereq->{requires},
+    CONFIGURE_REQUIRES => $prereqs_dump->(qw(configure requires)),
+    BUILD_REQUIRES     => $build_prereq,
+    PREREQ_PM          => $prereqs_dump->(qw(runtime   requires)),
 
     test => { TESTS => join q{ }, sort keys %test_dirs },
   );
@@ -128,6 +144,8 @@ sub setup_installer {
     [ \%write_makefile_args ],
     [ '*WriteMakefileArgs' ],
   );
+  $makefile_args_dumper->Sortkeys( 1 );
+  $makefile_args_dumper->Indent( 1 );
 
   my $content = $self->fill_in_string(
     $template,
@@ -154,11 +172,18 @@ has __write_makefile_args => (
   isa  => 'HashRef',
 );
 
+has 'make_path' => (
+  isa => 'Str',
+  is  => 'ro',
+  default => $Config{make} || 'make',
+);
+
 sub build {
   my $self = shift;
 
+  my $make = $self->make_path;
   system($^X => 'Makefile.PL') and die "error with Makefile.PL\n";
-  system('make')               and die "error running make\n";
+  system($make)                and die "error running $make\n";
 
   return;
 }
@@ -166,8 +191,9 @@ sub build {
 sub test {
   my ( $self, $target ) = @_;
 
+  my $make = $self->make_path;
   $self->build;
-  system('make test') and die "error running make test\n";
+  system($make, 'test') and die "error running $make test\n";
 
   return;
 }

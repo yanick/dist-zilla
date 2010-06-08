@@ -3,9 +3,10 @@ package Dist::Zilla::Plugin::UploadToCPAN;
 use Moose;
 with 'Dist::Zilla::Role::Releaser';
 
-use CPAN::Uploader 0.100660; # log method
+use CPAN::Uploader 0.101550; # ua string
 use File::HomeDir;
 use File::Spec;
+use Moose::Util::TypeConstraints;
 use Scalar::Util qw(weaken);
 
 use namespace::autoclean;
@@ -16,10 +17,10 @@ If loaded, this plugin will allow the F<release> command to upload to the CPAN.
 
 =head1 DESCRIPTION
 
-This plugin looks for configuration in your C<dist.ini> or
-C<~/.dzil/config.ini>:
+This plugin looks for configuration in your C<dist.ini> or (more
+likely) C<~/.dzil/config.ini>:
 
-  [=Dist::Zilla::App::Command::release]
+  [%PAUSE]
   user     = YOUR-PAUSE-ID
   password = YOUR-PAUSE-PASSWORD
 
@@ -35,10 +36,33 @@ C<~/.pause>, in the same format that L<cpan-upload> requires:
   package
     Dist::Zilla::Plugin::UploadToCPAN::_Uploader;
   use base 'CPAN::Uploader';
+  sub _ua_string { CPAN::Uploader->_ua_string }
+
   sub log {
     my $self = shift;
     $self->{'Dist::Zilla'}{plugin}->log(@_);
   }
+}
+
+has credentials_stash => (
+  is  => 'ro',
+  isa => 'Str',
+  default => '%PAUSE'
+);
+
+has _credentials_stash_obj => (
+  is   => 'ro',
+  isa  => maybe_type( class_type('Dist::Zilla::Stash::PAUSE') ),
+  lazy => 1,
+  init_arg => undef,
+  default  => sub { $_[0]->zilla->stash_named( $_[0]->credentials_stash ) },
+);
+
+sub _credential {
+  my ($self, $name) = @_;
+
+  return unless my $stash = $self->_credentials_stash_obj;
+  return $stash->$name;
 }
 
 has user => (
@@ -48,10 +72,7 @@ has user => (
   required => 1,
   default  => sub {
     my ($self) = @_;
-    return unless my $app = $self->zilla->chrome;
-    my $user = $app->config_for('Dist::Zilla::App::Command::release')->{user};
-    return $user if defined $user;
-    return $self->pause_cfg->{user};
+    return $self->_credential('user') || $self->pause_cfg->{user};
   },
 );
 
@@ -62,10 +83,7 @@ has password => (
   required => 1,
   default  => sub {
     my ($self) = @_;
-    return unless my $app = $self->zilla->chrome;
-    my $pass = $app->config_for('Dist::Zilla::App::Command::release')->{password};
-    return $pass if defined $pass;
-    return $self->pause_cfg->{password};
+    return $self->_credential('password') || $self->pause_cfg->{password};
   },
 );
 

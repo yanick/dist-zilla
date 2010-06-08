@@ -1,8 +1,194 @@
 Revision history for {{$dist->name}}
 
 {{$NEXT}}
-          GatherDir skips dot-directories if skipping dotfiles
+
+4.101582  2010-06-07 18:23:04 America/New_York
+          improve tests to work with new CPAN::Meta
+
+          fix incorrect type constraint in UploadToCPAN
+
+4.101580  2010-06-07 10:21:51 America/New_York
+          make UploadToCPAN look at the right stash by default
+
+4.101570  2010-06-06 23:36:58 America/New_York
+          validate distmeta before writing to disk
+
+          changes to Dist-Zilla's distribution metadata to validate
+
+4.101550  2010-06-04 11:16:13 America/New_York
+          a number of minor changes to documentation
+
+          a few improvements to use of type constraints in Zilla.pm
+
+          some methods that were undocumented have been _-prefixed
+
+          ModuleBuild now turns on recursive_test_files unconditionally
+
+          the install_command argument to $zilla->install should now be an
+          arrayref
+
+          suppressed a stringifying-undef warning when using UploadToCPAN
+
+          no longer try to compose an obsolete Dist::Zilla::Config role
+
+4.101540  2010-06-03 23:52:52 America/New_York
+          INCOMPATIBLE CHANGES:
+
+          New global config system!
+
+          Your ~/.dzil/config.ini is now broken.  Running `dzil` should tell
+          you how to fix it.  Probably just replace [!release] with [%PAUSE]
+          and delete everything else.  Hope that helps!
+
+          Major refactoring of our use of Config::MVP; this probably won't
+          break anything unless you wrote your own config readers, which I'm
+          pretty sure you haven't done!
+
+          config parameters beginning with a colon are not passed to plugins
+          (this should not really affect anyone)
+
+          OTHER CHANGES:
+
+          plugins are now registered as soon as their config section has been
+          read
+
+          Dist::Zilla::Role::Stash has been added
+
+          :version can now be passed as a config section value to require that
+          the config's package be of the specified version
+
+          reserved config property names (plugin_name, zilla) are now fatal
+          during config read rather than plugin instantiation
+
+          core license attrs will look in the %Rights stash for defaults
+
+          `dzil new` will work if you have no configured profiles
+
+          generated Makefile.PL no longer has trailing spaces (Florian Ragwitz)
+
+          Document 'user' parameter for :FakeRelease (Kent Fredric)
+
+          will probably work just fine on Win32 now!
+
+3.101520  2010-06-01 11:50:16 America/New_York
+          unixify all gathered filenames (Christian Walde)
+
+          ModuleBuild can use a custom M::B class (David Golden, Dave Rolsky)
+
+          set release_status distmeta based on is_trial (Apocalypse)
+
+          PkgVersion ignores packages which have a newline between the package
+          keyword and the package name (Dave Rolsky)
+
+          add version to :ExecFiles (scripts) as well as libraries with
+          PkgVersion and PodVersion
+
+          added --in option to the 'build' command (Marcel Gruenauer)
+
+3.101461  2010-05-26 22:34:18 America/New_York
+
+3.101460  2010-05-26 08:14:23 America/New_York
+          note required version of Config::MVP::Reader::INI
+
+          require a newer CPAN::Meta::Converter for laxer url validation
+
+3.101450  2010-05-25 18:18:09 America/New_York
+          compatibility with Config::MVP v1
+
+          merge test requires into build requires for MakeMaker
+
+          require a newer CPAN::Meta::Converter for custom key downgrades
+
+3.101421  2010-05-22 20:48:10 America/New_York
+          note the new version of CPAN::Meta::Converter required
+
+3.101410  2010-05-21 22:17:44 America/New_York
+          cope with newest Config::MVP
+
+3.101400  2010-05-20 11:30:41 America/New_York
+          ModuleBuild now uses $^X to run Build (Christian Walde)
+          
+          MakeMaker now uses the "make" program found in Config (Christian
+          Walde)
+
+3.101390  2010-05-19 09:15:32 America/New_York
+          INCOMPATIBLE CHANGES:
+
+          the as_distmeta method of Prereqs is removed
+
+          the ->prereq method on Dist::Zilla is gone (only prereqs remains)
+
+          distmeta is managed by CPAN::Meta, which expects v2 spec data by
+          default
+
+          most Dist::Zilla::Types are gone, now in MooseX::Types::Perl
+
+          OTHER CHANGES:
+
+          META.json and META.yml are now produced by CPAN::Meta
+
+          Dist::Zilla::Prereqs now proxies for CPAN::Meta::Prereqs
+
+          MetaResources supports CPAN Meta Spec version 2, but still works
+            with old-style resources as well (Dave Rolsky)
+
+          quote filenames with spaces in MANIFEST (Dave Rolsky)
+
+          Manifest plugin is now a FileGatherer, not an InstallTool
+
+          attempted a fix for `dzil install` on Win32 (RT #57404)
+
+2.101310  2010-05-11 09:02:45 America/New_York
+          update_filename arg added to NextRelease
+          `dzil new` can now be given a module name instead of dist name
+          PkgVersion will only declare $VERSION once per package in a file
+
+2.101290  2010-05-09 18:43:02 America/New_York
+          added GatherDir::Template (for use in dzil new profiles)
+          GatherDir will skip dot-dirs when excluding dotfiles
+
+2.101241  2010-05-04 22:51:31 America/New_York
+          tests should now pass on Win32
+
+          (these changes all thanks to APOCAL)
+          add GenerateFile plugin
+          make PodSyntaxTests require a newer, less-broken Test::Pod
+          sort and indent keys of args written to Makefile.PL and Build.PL
+          add %n and %t for \n and \t to NextRelease
+
+2.101240  2010-05-04 07:46:47 America/New_York
+          remove a 5.12 specific hunk of syntax (...) (thanks, BRICAS)
+
+2.101230  2010-05-03 23:42:27 America/New_York
+          NextRelease now has a time_zone parameter (thanks, APOCAL)
+
+          add a `dzil listdeps` command based on MARCEL's work (thanks, Robin
+            Smidsrød)
+
+          the new `dzil new` does stuff, but is not documented
+
+          add a "user" parameter to FakeRelease (David Golden)
+
+          minor documentation improvements here and there
+
+2.101170  2010-04-27 09:59:11 America/New_York
+          fix a bug that broke dists with multiple - in their name
+
+2.101160  2010-04-26 19:51:52 America/New_York
+          `dzil new` now does nothing and says so
+
+          dzil commands will not create a zilla object just for logging
+
+          easy bundles will less often create names with @@ in them
+
+2.101151  2010-04-25 23:40:28 America/New_York
           GatherDir and PruneCruft now both have verbose log output
+
+          the App config system has been moved and made non-public; it was
+          crazy and awful
+
+          version numbers are not validated by version.pm, not my own dumb
+          regex
 
           `dzil clean` no longer removes backup~ files (sorry, jq)
 

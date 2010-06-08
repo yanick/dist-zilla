@@ -18,26 +18,14 @@ sub zilla {
   return $_[0]->app->zilla;
 }
 
-=method config
-
-This method returns the configuration for the current command.
-
-=cut
-
-sub config {
-  my ($self) = @_;
-  return $self->{__PACKAGE__}{config} ||= $self->app->config_for(ref $self);
-}
-
 =method log
 
-This method calls the C<log> method of the command's L<Dist::Zilla|Dist::Zilla>
-object.
+This method calls the C<log> method of the application's chrome.
 
 =cut
 
 sub log {
-  $_[0]->zilla->log($_[1]);
+  $_[0]->app->chrome->logger->log($_[1]);
 }
 
 1;

@@ -1,12 +1,13 @@
-package Dist::Zilla::Config;
+package Dist::Zilla::Role::MVPReader;
 use Moose::Role;
 # ABSTRACT: stored configuration loader role
 
-use Config::MVP 0.100780; # fix mvp_* method laziness
+use Config::MVP 2; # finalization and what not
 
-with q(Config::MVP::Reader) => { -excludes => 'build_assembler' };
+use Dist::Zilla::MVP::Assembler::GlobalConfig;
+use Dist::Zilla::MVP::Assembler::Zilla;
 
-use Dist::Zilla::Util::MVPAssembler;
+use MooseX::Types::Perl qw(PackageName);
 
 =head1 DESCRIPTION
 
@@ -23,18 +24,18 @@ multivalue argument.
 
 =cut
 
+has assembler_class => (
+  is  => 'ro',
+  isa => PackageName,
+);
+
 sub build_assembler {
-  my $assembler = Dist::Zilla::Util::MVPAssembler->new;
+  my ($self) = @_;
 
-  my $root = $assembler->section_class->new({
-    name    => '_',
-    aliases => { author => 'authors' },
-    multivalue_args => [ qw(authors) ],
-  });
+  confess "neither assembler nor assembler_class were provided"
+    unless my $assembler_class = $self->assembler_class;
 
-  $assembler->sequence->add_section($root);
-
-  return $assembler;
+  return $assembler_class->new
 }
 
 no Moose::Role;

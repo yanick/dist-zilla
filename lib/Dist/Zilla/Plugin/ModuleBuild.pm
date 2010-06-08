@@ -26,6 +26,12 @@ B<Optional:> Specify the minimum version of L<Module::Build> to depend on.
 
 Defaults to 0.3601
 
+=attr mb_class
+
+B<Optional:> Specify the class to use to create the build object.  Defaults
+to C<Module::Build> itself.  If another class is specified, C<use lib 'inc'>
+is also added to the Build.PL file.
+
 =cut
 
 has 'mb_version' => (
@@ -34,18 +40,36 @@ has 'mb_version' => (
   default => '0.3601',
 );
 
+has 'mb_class' => (
+  isa => 'Str',
+  is  => 'rw',
+  default => 'Module::Build',
+);
+
 my $template = q|
 use strict;
 use warnings;
 
 use Module::Build {{ $plugin->mb_version }};
+{{ $plugin->_use_custom_class }}
 
 my {{ $module_build_args }}
 
-my $build = Module::Build->new(%module_build_args);
+my $build = {{ $plugin->mb_class }}->new(%module_build_args);
 
 $build->create_build_script;
 |;
+
+sub _use_custom_class {
+  my ($self) = @_;
+  my $class = $self->mb_class;
+  if ( $class eq 'Module::Build' ) {
+    return "";
+  }
+  else {
+    return "use lib 'inc'; use $class;";
+  }
+}
 
 sub register_prereqs {
   my ($self) = @_;
@@ -75,6 +99,18 @@ sub setup_installer {
   $self->log_fatal("can't install files with whitespace in their names")
     if grep { /\s/ } @exe_files;
 
+  my $prereqs = $self->zilla->prereqs;
+  my %prereqs = (
+    configure_requires => $prereqs->requirements_for(qw(configure requires)),
+    build_requires     => $prereqs->requirements_for(qw(build     requires)),
+    requires           => $prereqs->requirements_for(qw(runtime   requires)),
+    recommends         => $prereqs->requirements_for(qw(runtime   recommends)),
+  );
+
+  $prereqs{build_requires} = $prereqs{build_requires}->clone->add_requirements(
+    $prereqs->requirements_for(qw(test requires))
+  );
+
   my %module_build_args = (
     module_name   => $name,
     license       => $self->zilla->license->meta_yml_name,
@@ -85,9 +121,8 @@ sub setup_installer {
     script_files  => \@exe_files,
     ($self->zilla->_share_dir ? (share_dir => $self->zilla->_share_dir) : ()),
 
-    # I believe it is a happy coincidence, for the moment, that this happens to
-    # return just the same thing that is needed here. -- rjbs, 2010-01-22
-    $self->zilla->prereq->as_distmeta->flatten,
+    (map {; $_ => $prereqs{$_}->as_string_hash } keys %prereqs),
+    recursive_test_files => 1,
   );
 
   $self->__module_build_args(\%module_build_args);
@@ -96,6 +131,8 @@ sub setup_installer {
     [ \%module_build_args ],
     [ '*module_build_args' ],
   );
+  $module_build_dumper->Sortkeys( 1 );
+  $module_build_dumper->Indent( 1 );
 
   my $content = $self->fill_in_string(
     $template,
@@ -124,7 +161,7 @@ sub build {
   my $self = shift;
 
   system($^X => 'Build.PL') and die "error with Build.PL\n";
-  system('./Build')         and die "error running ./Build\n";
+  system($^X, 'Build')      and die "error running $^X Build\n";
 
   return;
 }
@@ -133,7 +170,7 @@ sub test {
   my ($self, $target) = @_;
 
   $self->build;
-  system('./Build test') and die "error running ./Build test\n";
+  system($^X, 'Build', 'test') and die "error running $^X Build test\n";
 
   return;
 }

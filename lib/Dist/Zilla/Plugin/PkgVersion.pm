@@ -4,7 +4,7 @@ use Moose;
 with(
   'Dist::Zilla::Role::FileMunger',
   'Dist::Zilla::Role::FileFinderUser' => {
-    default_finders => [ ':InstallModules' ],
+    default_finders => [ ':InstallModules', ':ExecFiles' ],
   },
 );
 
@@ -16,6 +16,15 @@ This plugin will add a line like the following to each package in each Perl
 module or program (more or less) within the distribution:
 
   our $VERSION = 0.001; # where 0.001 is the version of the dist
+
+It will skip any package declaration that includes a newline between the
+C<package> keyword and the package name, like:
+
+  package
+    Foo::Bar;
+
+This sort of declaration is also ignored by the CPAN toolchain, and is
+typically used when doing monkey patching or other tricky things.
 
 =cut
 
@@ -55,15 +64,27 @@ sub munge_perl {
     my $code_only = $document->clone;
     $code_only->prune("PPI::Token::$_") for qw(Comment Pod Quote Regexp);
     if ($code_only->serialize =~ /\$VERSION\s*=/sm) {
-      $self->log(sprintf('skipping %s: assigns to $VERSION', $file->name));
+      $self->log([ 'skipping %s: assigns to $VERSION', $file->name ]);
       return;
     }
   }
 
   return unless my $package_stmts = $document->find('PPI::Statement::Package');
 
+  my %seen_pkg;
+
   for my $stmt (@$package_stmts) {
     my $package = $stmt->namespace;
+
+    if ($seen_pkg{ $package }++) {
+      $self->log([ 'skipping package re-declaration for %s', $package ]);
+      next;
+    }
+
+    if ($stmt->content =~ /package\s*\n\s*\Q$package/) {
+      $self->log([ 'skipping private package %s', $package ]);
+      next;
+    }
 
     # the \x20 hack is here so that when we scan *this* document we don't find
     # an assignment to version; it shouldn't be needed, but it's been annoying

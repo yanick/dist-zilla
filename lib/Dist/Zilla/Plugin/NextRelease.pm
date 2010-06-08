@@ -13,13 +13,21 @@ use String::Formatter 0.100680 stringf => {
   input_processor => 'require_single_input',
   string_replacer => 'method_replace',
   codes => {
-    v => sub { $_[0]->version },
+    v => sub { $_[0]->zilla->version },
     d => sub {
-      DateTime->from_epoch(epoch => $^T, time_zone => 'local')
+      DateTime->from_epoch(epoch => $^T, time_zone => $_[0]->time_zone)
               ->format_cldr($_[1]),
-    }
+    },
+    t => sub { "\t" },
+    n => sub { "\n" },
   },
 };
+
+has time_zone => (
+  is => 'ro',
+  isa => 'Str', # should be more validated later -- apocal
+  default => 'local',
+);
 
 has format => (
   is  => 'ro',
@@ -33,10 +41,17 @@ has filename => (
   default => 'Changes',
 );
 
+has update_filename => (
+  is  => 'ro',
+  isa => 'Str',
+  lazy    => 1,
+  default => sub { $_[0]->filename },
+);
+
 sub section_header {
   my ($self) = @_;
 
-  return _format_version($self->format, $self->zilla);
+  return _format_version($self->format, $self);
 }
 
 sub munge_files {
@@ -77,13 +92,14 @@ sub after_release {
   $content =~ s{ (\Q$delim->[0]\E \s*) \$NEXT (\s* \Q$delim->[1]\E) }
                {$1\$NEXT$2\n\n$header}xs;
 
-  $self->log_debug([ 'updating contents of %s on disk', $filename ]);
+  my $update_fn = $self->update_filename;
+  $self->log_debug([ 'updating contents of %s on disk', $update_fn ]);
 
   # and finally rewrite the changelog on disk
-  open my $out_fh, '>', $filename
-    or Carp::croak("can't open $filename for writing: $!");
-  print $out_fh $content or Carp::croak("error writing to $filename: $!");
-  close $out_fh or Carp::croak("error closing $filename: $!");
+  open my $out_fh, '>', $update_fn
+    or Carp::croak("can't open $update_fn for writing: $!");
+  print $out_fh $content or Carp::croak("error writing to $update_fn: $!");
+  close $out_fh or Carp::croak("error closing $update_fn: $!");
 }
 
 __PACKAGE__->meta->make_immutable;
@@ -113,7 +129,6 @@ F<Changes> file:
 
   {{$NEXT}}
 
-
 The C<NextRelease> plugin will then do 2 things:
 
 =over 4
@@ -130,13 +145,30 @@ information.
 
 =back
 
-
 The module accepts the following options in its F<dist.ini> section:
 
-=over 4
+=begin :list
 
-=item * filename - the name of your changelog file. defaults to F<Changes>.
+= filename
+the name of your changelog file;  defaults to F<Changes>
 
-=item * format - the date format. defaults to C<%-9v %{yyyy-MM-dd HH:mm:ss VVVV}d>.
+= update_filename
+the file to which to write an updated changelog to; defaults to the C<filename>
 
-=back
+= format
+sprintf-like string used to compute the next value of C<{{$NEXT}}>;
+defaults to C<%-9v %{yyyy-MM-dd HH:mm:ss VVVV}d>
+
+= time_zone
+the timezone to use when generating the date;  defaults to I<local>
+
+=end :list
+
+The module allows the following sprintf-like format codes in the format:
+
+=for :list
+* v - the version of the dist
+* d - the CLDR format for L<DateTime>
+* n - a newline
+* t - a tab
+
