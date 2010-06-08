@@ -6,6 +6,18 @@ package Dist::Zilla::App::Command::plugins;
 
 use Dist::Zilla::App -command;
 
+=head1 SYNOPSIS
+
+    dzil plugins [ --pod SomePlugin ]
+
+=head1 DESCRIPTION
+
+When used without argument, this command prints the list of
+all Dist::Zilla plugins available on the machine, with the ones
+used by the project's I<dist.ini> marked with an I<*>.
+
+=cut
+
 use autodie;
 
 use Moose::Autobox;
@@ -14,8 +26,30 @@ use Module::Pluggable search_path => 'Dist::Zilla::Plugin', require => 1;
 
 sub abstract { 'print all available plugins' }
 
+sub opt_spec {
+    [ 'pod=s' => 'print the plugin documentation' ],
+}
+
+=head1 OPTIONS
+
+=head2 --pod I<SomePlugin>
+
+Prints the documentation of the given plugin. Basically, a shortcut for
+
+    perldoc Dist::Zilla::Plugin::SomePlugin
+
+
+=cut
+
 sub execute {
   my ($self, $opt, $arg) = @_;
+
+  if ( my $plugin = $opt->pod ) {
+      require Pod::Perldoc;
+      $plugin = "Dist::Zilla::Plugin::$plugin";
+      local @ARGV = ( $plugin );
+      exit Pod::Perldoc->run;
+  }
 
   my %loaded_plugins = map { $_->plugin_name => 1 } @{ $self->zilla->plugins };
 
@@ -48,13 +82,3 @@ sub get_plugin_abstract {
 1;
 
 __END__
-
-=head1 SYNOPSIS
-
-Show all available Dist::Zilla plugins on the system:
-
-  dzil plugins
-
-Plugins that are active for this distribution will be labelled with a start ('*').
-
-=cut
