@@ -10,8 +10,12 @@ Creates a new Dist-Zilla based distribution under the current directory.
 
   $ dzil new Main::Module::Name
 
-There is one useful argument, C<-p>.  If given, it instructs C<dzil> to look
-for dist minting configuration under the given name.  For example:
+There are two arguments, C<-p> and C<-P>. C<-P> specify the minting profile
+provider and C<-p> - the profile name.
+
+The default profile provider first looks in the
+F<~/.dzil/profiles/$profile_name> and then among standard profiles, shipped
+with Dist::Zilla. For example:
 
   $ dzil new -p work Corporate::Library
 
@@ -19,6 +23,12 @@ This command would instruct C<dzil> to look in F<~/.dzil/profiles/work> for a
 F<profile.ini> (or other "profile" config file).  If no profile name is given,
 C<dzil> will look for the C<default> profile.  If no F<default> directory
 exists, it will use a very simple configuration shipped with Dist::Zilla.
+
+  $ dzil new -P Foo Corporate::Library
+
+This command would instruct C<dzil> to consult the Foo provider about the
+directory of 'default' profile.
+
 
 =cut
 
@@ -31,7 +41,12 @@ sub abstract { 'mint a new dist' }
 sub usage_desc { '%c %o <ModuleName>' }
 
 sub opt_spec {
-  [ 'profile|p=s', 'name of the profile to use', { default => 'default' } ],
+  [ 'profile|p=s',  'name of the profile to use',
+    { default => 'default' }  ],
+
+  [ 'provider|P=s', 'name of the profile provider to use',
+    { default => 'Default' }  ],
+
   # [ 'module|m=s@', 'module(s) to create; may be given many times'         ],
 }
 
@@ -57,7 +72,8 @@ sub execute {
 
   require Dist::Zilla;
   my $minter = Dist::Zilla->_new_from_profile(
-    $opt->profile => {
+    [ $opt->provider, $opt->profile ],
+    {
       chrome  => $self->app->chrome,
       name    => $dist,
       _global_stashes => $self->app->_build_global_stashes,

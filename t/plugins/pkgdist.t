@@ -9,7 +9,7 @@ use Test::DZil;
 
 my $with_version = '
 package DZT::WVer;
-our $VERSION = 1.234;
+our $DIST = \'DZT-Blort\';
 1;
 ';
 
@@ -61,9 +61,9 @@ my $tzil = Dist::Zilla::Tester->from_config(
       'source/lib/DZT/R1.pm'     => $repeated_packages,
       'source/lib/DZT/Monkey.pm' => $monkey_patched,
       'source/bin/script_pkg.pl' => $script_pkg,
-      'source/bin/script_ver.pl' => $script_pkg . "our \$VERSION = 1.234;\n",
+      'source/bin/script_ver.pl' => $script_pkg . "our \$DIST = 'DZT-Blort';\n",
       'source/bin/script.pl'     => $script,
-      'source/dist.ini' => simple_ini('GatherDir', 'PkgVersion', 'ExecDir'),
+      'source/dist.ini' => simple_ini('GatherDir', 'PkgDist', 'ExecDir'),
     },
   },
 );
@@ -73,34 +73,34 @@ $tzil->build;
 my $dzt_sample = $tzil->slurp_file('build/lib/DZT/Sample.pm');
 like(
   $dzt_sample,
-  qr{^\s*\$\QDZT::Sample::VERSION = '0.001';\E$}m,
+  qr{^\s*\$\QDZT::Sample::DIST = 'DZT-Sample';\E$}m,
   "added version to DZT::Sample",
 );
 
 my $dzt_tp1 = $tzil->slurp_file('build/lib/DZT/TP1.pm');
 like(
   $dzt_tp1,
-  qr{^\s*\$\QDZT::TP1::VERSION = '0.001';\E$}m,
+  qr{^\s*\$\QDZT::TP1::DIST = 'DZT-Sample';\E$}m,
   "added version to DZT::TP1",
 );
 
 like(
   $dzt_tp1,
-  qr{^\s*\$\QDZT::TP2::VERSION = '0.001';\E$}m,
+  qr{^\s*\$\QDZT::TP2::DIST = 'DZT-Sample';\E$}m,
   "added version to DZT::TP2",
 );
 
 my $dzt_wver = $tzil->slurp_file('build/lib/DZT/WVer.pm');
 unlike(
   $dzt_wver,
-  qr{^\s*\$\QDZT::WVer::VERSION = '0.001';\E$}m,
+  qr{^\s*\$\QDZT::WVer::DIST = 'DZT-Sample';\E$}m,
   "*not* added to DZT::WVer; we have one already",
 );
 
 my $dzt_script_pkg = $tzil->slurp_file('build/bin/script_pkg.pl');
 like(
     $dzt_script_pkg,
-    qr{^\s*\$\QDZT::Script::VERSION = '0.001';\E$}m,
+    qr{^\s*\$\QDZT::Script::DIST = 'DZT-Sample';\E$}m,
     "added version to DZT::Script",
 );
 
@@ -109,7 +109,7 @@ TODO: {
     my $dzt_script = $tzil->slurp_file('build/bin/script.pl');
     like(
         $dzt_script,
-        qr{^\s*\$\QDZT::Script::VERSION = '0.001';\E$}m,
+        qr{^\s*\$\QDZT::Script::DIST = 'DZT-Sample';\E$}m,
         "added version to plain script",
     );
 };
@@ -117,24 +117,24 @@ TODO: {
 my $script_wver = $tzil->slurp_file('build/bin/script_ver.pl');
 unlike(
     $script_wver,
-    qr{^\s*\$\QDZT::WVer::VERSION = '0.001';\E$}m,
+    qr{^\s*\$\QDZT::WVer::DIST = 'DZT-Sample';\E$}m,
     "*not* added to versioned DZT::Script; we have one already",
 );
 
 ok(
-  grep({ m(skipping lib/DZT/WVer\.pm: assigns to \$VERSION) }
+  grep({ m(skipping lib/DZT/WVer\.pm: assigns to \$DIST) }
     @{ $tzil->log_messages }),
   "we report the reason for no updateing WVer",
 );
 
 my $dzt_r1 = $tzil->slurp_file('build/lib/DZT/R1.pm');
-my @matches = grep { /R1::VER/ } split /\n/, $dzt_r1;
-is(@matches, 1, "we add at most 1 VERSION per package");
+my @matches = grep { /R1::DIST/ } split /\n/, $dzt_r1;
+is(@matches, 1, "we add at most 1 DIST per package");
 
 my $dzt_monkey = $tzil->slurp_file('build/lib/DZT/Monkey.pm');
 unlike(
   $dzt_monkey,
-  qr{\$DZT::TP2::VERSION},
+  qr{\$DZT::TP2::DIST},
   "no version for DZT::TP2 when it looks like a monkey patch"
 );
 

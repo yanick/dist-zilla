@@ -15,7 +15,6 @@ use Dist::Zilla::Types qw(License);
 use Archive::Tar;
 use File::Find::Rule;
 use File::pushd ();
-use File::ShareDir ();
 use Hash::Merge::Simple ();
 use List::MoreUtils qw(uniq);
 use List::Util qw(first);
@@ -43,7 +42,7 @@ published, released code, it can do much more than those tools, and is free to
 make much more ludicrous demands in terms of prerequisites.
 
 If you have access to the web, you can learn more and find an interactive
-tutorial at L<dzil.org|http://dzil.org/>.  If not, try
+tutorial at B<L<dzil.org|http://dzil.org/>>.  If not, try
 L<Dist::Zilla::Tutorial>.
 
 =cut
@@ -832,6 +831,12 @@ sub build_archive {
     '.tar.gz',
   ));
 
+  # Fix up the CHMOD on the archived files, to inhibit 'withoutworldwritables'
+  # behaviour on win32.
+  for my $f ( $archive->get_files ) {
+    $f->mode( $f->mode & ~022 );
+  }
+
   $self->log("writing archive to $file");
   $archive->write("$file", 9);
 
@@ -889,6 +894,12 @@ sub _write_out_file {
   Carp::croak("attempted to write $to multiple times") if -e $to;
 
   open my $out_fh, '>', "$to" or die "couldn't open $to to write: $!";
+
+  # This is needed, or \n is translated to \r\n on win32.
+  # Maybe :raw:utf8 is needed, but not sure.
+  #     -- Kentnl - 2010-06-10
+  binmode( $out_fh , ":raw" );
+
   print { $out_fh } $file->content;
   close $out_fh or die "error closing $to: $!";
   chmod $file->mode, "$to" or die "couldn't chmod $to: $!";
@@ -1175,7 +1186,7 @@ sub stash_named {
 #####################################
 
 sub _new_from_profile {
-  my ($class, $profile_name, $arg) = @_;
+  my ($class, $profile_data, $arg) = @_;
   $arg ||= {};
 
   my $config_class =
@@ -1203,20 +1214,18 @@ sub _new_from_profile {
       if $arg->{_global_stashes};
   }
 
-  my $profile_dir = dir( File::HomeDir->my_home )->subdir(qw(.dzil profiles));
-
-  my $seq;
-
-  if ($profile_name eq 'default' and ! -e $profile_dir->subdir('default')) {
-    $profile_dir = dir( File::ShareDir::dist_dir('Dist-Zilla') )
-                 ->subdir('profiles');
-  }
-
-  $assembler->sequence->section_named('_')->add_value(
-    root => $profile_dir->subdir($profile_name)
+  my $module = String::RewritePrefix->rewrite(
+    { '' => 'Dist::Zilla::MintingProfile::', '=', => '' },
+    $profile_data->[0],
   );
-  $seq = $config_class->read_config(
-    $profile_dir->subdir($profile_name)->file('profile'),
+  Class::MOP::load_class($module);
+
+  my $profile_dir = $module->profile_dir($profile_data->[1]);
+
+  $assembler->sequence->section_named('_')->add_value(root => $profile_dir);
+
+  my $seq = $config_class->read_config(
+    $profile_dir->file('profile'),
     {
       assembler => $assembler
     },
@@ -1267,7 +1276,7 @@ sub mint_dist {
     my $minter = $self->plugin_named(
       $module->{minter_name} || ':DefaultModuleMaker'
     );
-    
+
     $minter->make_module({ name => $module->{name} })
   }
 
@@ -1300,6 +1309,9 @@ __END__
 
 There are usually people on C<irc.perl.org> in C<#distzilla>, even if they're
 idling.
+
+The L<Dist::Zilla website|http://dzil.org/> has several valuable resources for
+learning to use Dist::Zilla.
 
 There is a mailing list to discuss Dist::Zilla.  You can L<join the
 list|http://www.listbox.com/subscribe/?list_id=139292> or L<browse the
