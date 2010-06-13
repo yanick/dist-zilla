@@ -12,11 +12,46 @@ In your F<dist.ini>:
   MRO::Compat = 10
   Sub::Exporter = 0
 
+Which is equivalent to specifying prerequisites for the C<Runtime>
+phase:
+
+  [Prereq / RuntimeRequires]
+  Foo::Bar = 1.002
+  MRO::Compat = 10
+  Sub::Exporter = 0
+
+See L</Phases> for the full list of supported phases.
+
 =head1 DESCRIPTION
 
 This module adds "fixed" prerequisites to your distribution.  These are prereqs
 with a known, fixed minimum version that doens't change based on platform or
 other conditions.
+
+You can specify prerequisites for different phases and kinds of relationships.
+In C<RuntimeRequires>, the phase is Runtime and the relationship is Requires.
+These are described in more detail in the L<CPAN::Meta
+specification|CPAN::Meta::Spec/PREREQUISITES>.
+
+The phases are:
+
+=for :list
+* configure
+* build
+* test
+* runtime
+* develop
+
+The relationship types are:
+
+=for :list
+* requires
+* recommends
+* suggests
+* conflicts
+
+Not all of these phases are useful for all tools, especially tools that only
+understand version 1.x CPAN::Meta files.
 
 =cut
 
@@ -28,8 +63,8 @@ sub __from_name {
   # relationship such as C<requires>, C<prefers>, or C<recommends>.  The
 
   my ($phase, $type) = $name =~ /\A
-    (Build|Test|Runtime|Configure)
-    (Requires|Prefers|Recommends)
+    (Build|Test|Runtime|Configure|Develop)
+    (Requires|Recommends|Suggests|Conflicts)
   \z/x;
 
   return ($phase, $type);

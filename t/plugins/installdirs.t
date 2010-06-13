@@ -38,7 +38,7 @@ test_this(
   sub {
     my $tzil = shift;
     my $makefile = $tzil->slurp_file('build/Makefile.PL');
-    unlike($makefile, qr/install_share .share./, "not going to install share");
+    unlike($makefile, qr/install_share dist => .share./, "not going to install share");
   },
 );
 
@@ -48,7 +48,7 @@ test_this(
   sub {
     my $tzil = shift;
     my $makefile = $tzil->slurp_file('build/Makefile.PL');
-    unlike($makefile, qr/install_share .share./, "not going to install share");
+    unlike($makefile, qr/install_share dist => .share./, "not going to install share");
   },
 );
 
@@ -61,7 +61,7 @@ test_this(
     my $makefile = $tzil->slurp_file('build/Makefile.PL');
     unlike(
       $makefile,
-      qr/install_share .share./,
+      qr/install_share dist => .share./,
       "files in ./share, but no ShareDir, so we will not install_share"
     );
   },
@@ -75,7 +75,7 @@ test_this(
     my $makefile = $tzil->slurp_file('build/Makefile.PL');
     like(
       $makefile,
-      qr/install_share .share./,
+      qr/install_share dist => .share./,
       "files in ./share, ShareDir, so we will install_share"
     );
   },
@@ -88,9 +88,152 @@ test_this(
     my $tzil = shift;
     my $modulebuild = $tzil->plugin_named('ModuleBuild');
     is(
-      $modulebuild->__module_build_args->{share_dir},
+      $modulebuild->__module_build_args->{share_dir}{dist},
       'share',
       "files in ./share, ShareDir, so we have a Build.PL share_dir"
+    );
+  },
+);
+
+# ModuleShareDirs
+
+test_this(
+  [ qw(MakeMaker) ],
+  { },
+  sub {
+    my $tzil = shift;
+    my $makefile = $tzil->slurp_file('build/Makefile.PL');
+    unlike($makefile, qr/install_share module => .DZT::Simple., .share./,
+      "not going to install module-based share"
+    );
+  },
+);
+
+test_this(
+  [ qw(MakeMaker ModuleShareDirs) ],
+  { },
+  sub {
+    my $tzil = shift;
+    my $makefile = $tzil->slurp_file('build/Makefile.PL');
+    unlike($makefile, qr/install_share module => .DZT::Simple., .share./,
+      "not going to install module-based share"
+    );
+  },
+);
+
+test_this(
+  [ qw(MakeMaker ModuleShareDirs) ],
+  { 'source/share/stupid-share.txt' => "This is a sharedir file.\n" },
+  sub {
+    my $tzil = shift;
+    my $makefile = $tzil->slurp_file('build/Makefile.PL');
+    unlike($makefile, qr/install_share module => .DZT::Simple., .share./,
+      "files in ./share, empty ModuleShareDirs, so we will not install_share"
+    );
+  },
+);
+
+test_this(
+  [
+    'MakeMaker',
+    ['ModuleShareDirs' => { 'DZT::Simple' => 'share' } ],
+  ],
+  { 'source/share/stupid-share.txt' => "This is a sharedir file.\n" },
+  sub {
+    my $tzil = shift;
+    my $makefile = $tzil->slurp_file('build/Makefile.PL');
+    like($makefile, qr/install_share module => .DZT::Simple., .share./,
+      "files in ./share, ModuleShareDirs given, so we will install_share"
+    );
+  },
+);
+
+test_this(
+  [
+    'MakeMaker',
+    ['ModuleShareDirs' => { 'DZT::Simple' => 'share', 'DZT::Other' => 'other' } ],
+  ],
+  {
+    'source/share/stupid-share.txt' => "This is a sharedir file.\n",
+    'source/other/stupid-other.txt' => "This is another sharedir file.\n",
+  },
+  sub {
+    my $tzil = shift;
+    my $makefile = $tzil->slurp_file('build/Makefile.PL');
+    like($makefile, qr/install_share module => .DZT::Simple., .share./,
+      "files in ./share, ModuleShareDirs given, so we will install_share"
+    );
+    like($makefile, qr/install_share module => .DZT::Other., .other./,
+      "files in ./other, another ModuleShareDirs given, so we will install_share"
+    );
+  },
+);
+
+test_this(
+  [
+    'MakeMaker', 'ShareDir',
+    ['ModuleShareDirs' => { 'DZT::Simple' => 'simple', 'DZT::Other' => 'other' } ],
+  ],
+  {
+    'source/share/stupid-share.txt' => "This is a sharedir file.\n",
+    'source/other/stupid-other.txt' => "This is another sharedir file.\n",
+    'source/simple/stupid-other.txt' => "This is another simple sharedir file.\n",
+  },
+  sub {
+    my $tzil = shift;
+    my $makefile = $tzil->slurp_file('build/Makefile.PL');
+    like($makefile, qr/install_share dist => .share./,
+      "ShareDir and ModuleShareDirs: dist share"
+    );
+    like($makefile, qr/install_share module => .DZT::Simple., .simple./,
+      "ShareDir and ModuleShareDirs: first module share",
+    );
+    like($makefile, qr/install_share module => .DZT::Other., .other./,
+      "ShareDir and ModuleShareDirs: other module share"
+    );
+  },
+);
+
+test_this(
+  [
+    'ModuleBuild',
+    ['ModuleShareDirs' => { 'DZT::Simple' => 'share' } ],
+  ],
+  { 'source/share/stupid-share.txt' => "This is a sharedir file.\n" },
+  sub {
+    my $tzil = shift;
+    my $modulebuild = $tzil->plugin_named('ModuleBuild');
+    is(
+      $modulebuild->__module_build_args->{share_dir}{module}{'DZT::Simple'},
+      'share',
+      "files in ./share, ModuleShareDirs given, so we have a Build.PL share_dir"
+    );
+  },
+);
+
+test_this(
+  [
+    'ModuleBuild', 'ShareDir',
+    ['ModuleShareDirs' => { 'DZT::Simple' => 'simple', 'DZT::Other' => 'other' } ],
+  ],
+  {
+    'source/share/stupid-share.txt' => "This is a sharedir file.\n",
+    'source/other/stupid-other.txt' => "This is another sharedir file.\n",
+    'source/simple/stupid-other.txt' => "This is another simple sharedir file.\n",
+  },
+  sub {
+    my $tzil = shift;
+    my $modulebuild = $tzil->plugin_named('ModuleBuild');
+    is_deeply(
+      $modulebuild->__module_build_args->{share_dir},
+      {
+        dist => 'share',
+        module => {
+          'DZT::Simple' => 'simple',
+          'DZT::Other' => 'other',
+        },
+      },
+      "ModuleBuild with ShareDir and ModuleShareDirs"
     );
   },
 );
@@ -103,7 +246,7 @@ test_this(
   sub {
     my $tzil = shift;
     my $makemaker = $tzil->plugin_named('MakeMaker');
-    
+
     is_deeply(
       $makemaker->__write_makefile_args->{EXE_FILES},
       [],

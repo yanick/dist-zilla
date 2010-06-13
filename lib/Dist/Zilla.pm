@@ -23,6 +23,7 @@ use Params::Util qw(_HASHLIKE);
 use Path::Class;
 use Software::License 0.101370; # meta2_name
 use String::RewritePrefix;
+use Try::Tiny;
 
 use Dist::Zilla::Prereqs;
 use Dist::Zilla::File::OnDisk;
@@ -337,7 +338,21 @@ has authors => (
   isa  => ArrayRef[Str],
   lazy => 1,
   required => 1,
-  default  => sub { [ $_[0]->copyright_holder ] },
+  default  => sub {
+    my ($self) = @_;
+
+    if (my $stash  = $self->stash_named('%User')) {
+      return $stash->authors;
+    }
+
+    my $author = try { $self->copyright_holder };
+    return [ $author ] if defined $author and length $author;
+
+    $self->log_fatal(
+      "No %User stash and no copyright holder;",
+      "can't determine dist author; configure author or a %User section",
+    );
+  },
 );
 
 =attr files
@@ -584,10 +599,21 @@ sub _setup_default_builder_plugins {
       zilla       => $self,
       style       => 'list',
       code        => sub {
-        return [] unless my $dir = $self->zilla->_share_dir;
-        return $self->zilla->files->grep(sub {
-          local $_ = $_->name; m{\A\Q$dir\E/}
-        });
+        my $map = $self->zilla->_share_dir_map;
+        my @files;
+        if ( $map->{dist} ) {
+          push @files, $self->zilla->files->grep(sub {
+            local $_ = $_->name; m{\A\Q$map->{dist}\E/}
+          });
+        }
+        if ( my $mod_map = $map->{module} ) {
+          for my $mod ( keys %$mod_map ) {
+            push @files, $self->zilla->files->grep(sub {
+              local $_ = $_->name; m{\A\Q$mod_map->{$mod}\E/}
+            });
+          }
+        }
+        return \@files;
       },
     });
 
@@ -692,20 +718,38 @@ sub find_files {
   $plugin->find_files;
 }
 
-sub _share_dir {
+has _share_dir_map => (
+  is   => 'ro',
+  isa  => 'HashRef',
+  init_arg  => undef,
+  lazy      => 1,
+  builder   => '_build_share_dir_map',
+);
+
+sub _build_share_dir_map {
   my ($self) = @_;
 
-  my @share_dirs =
-    uniq $self->plugins_with(-ShareDir)->map(sub { $_->dir })->flatten;
+  my $share_dir_map = {};
 
-  $self->log_fatal("can't install more than one ShareDir") if @share_dirs > 1;
+  for my $plugin ( $self->plugins_with(-ShareDir)->flatten ) {
+    next unless my $sub_map = $plugin->share_dir_map;
 
-  return unless defined(my $share_dir = $share_dirs[0]);
+    if ( $sub_map->{dist} ) {
+      $self->log_fatal("can't install more than one distribution ShareDir")
+        if $share_dir_map->{dist};
+      $share_dir_map->{dist} = $sub_map->{dist};
+    }
 
-  return unless grep { $_->name =~ m{\A\Q$share_dir\E/} }
-                $self->files->flatten;
+    if ( my $mod_map = $sub_map->{module} ) {
+      for my $mod ( keys %$mod_map ) {
+        $self->log_fatal("can't install more than one ShareDir for $mod")
+          if $share_dir_map->{module}{$mod};
+        $share_dir_map->{module}{$mod} = $mod_map->{$mod};
+      }
+    }
+  }
 
-  return $share_dirs[0];
+  return $share_dir_map;
 }
 
 =method build_in
