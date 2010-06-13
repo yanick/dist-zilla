@@ -8,13 +8,14 @@ use Dist::Zilla::App -command;
 
 =head1 SYNOPSIS
 
-    dzil plugins [ --pod SomePlugin ]
+    dzil plugins [ SomePlugin ]
 
 =head1 DESCRIPTION
 
 When used without argument, this command prints the list of
 all Dist::Zilla plugins available on the machine, with the ones
-used by the project's I<dist.ini> marked with an I<*>.
+used by the project's I<dist.ini> marked with an I<*>. If a plugin
+is provided, its POD is printed out.
 
 =cut
 
@@ -26,25 +27,10 @@ use Module::Pluggable search_path => 'Dist::Zilla::Plugin', require => 1;
 
 sub abstract { 'print all available plugins' }
 
-sub opt_spec {
-    [ 'pod=s' => 'print the plugin documentation' ],
-}
-
-=head1 OPTIONS
-
-=head2 --pod I<SomePlugin>
-
-Prints the documentation of the given plugin. Basically, a shortcut for
-
-    perldoc Dist::Zilla::Plugin::SomePlugin
-
-
-=cut
-
 sub execute {
   my ($self, $opt, $arg) = @_;
 
-  if ( my $plugin = $opt->pod ) {
+  if ( my( $plugin ) = @$arg ) {
       require Pod::Perldoc;
       $plugin = "Dist::Zilla::Plugin::$plugin";
       local @ARGV = ( $plugin );
